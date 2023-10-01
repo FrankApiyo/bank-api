@@ -1,9 +1,11 @@
 (ns banks.main
-  (:require [io.pedestal.http :as http]
+  (:require [banks.utils :refer [get-value-from-request-body
+                                 get-and-update-account-balance]]
+            [io.pedestal.http :as http]
             [io.pedestal.http.route :as route]
             [io.pedestal.test :as test]
             [utils :refer get-value-from-request-body]
-            [cheshire.core :refer [generate-string parse-string]]))
+            [cheshire.core :refer [generate-string]]))
 
 (defonce database (atom {}))
 
@@ -28,22 +30,48 @@
 (defn make-account [name]
   {:name name})
 
-
 (def account-create
   {:name :account-create
    :enter
    (fn [context]
-     (let [name (-> context
-                    (get-in [:request :body])
-                    slurp
-                    parse-string
-                    (get "name" "Unamed Account"))
+     (let [name (get-value-from-request-body
+                 context "name" "Unamed Account")
            db-id (str (gensym "acc"))
            url (route/url-for :account-view :params {:account-id db-id})
            new-account (make-account name)]
        (assoc context
               :tx-data [assoc db-id new-account]
               :response (created new-account "Location" url))))})
+
+(def account-deposit
+  {:name :deposit-to-account
+   :enter (fn [context]
+            (let [account-id (get-in context [:request :query-params :account-id])
+                  ammount (or
+                           (get-in context
+                                   [:request
+                                    :query-params
+                                    :ammount])
+                           (get-value-from-request-body
+                            context "ammount" 0))
+                  account (get-and-update-account-balance
+                           context
+                           account-id
+                           ammount)
+                  url (route/url-for :account-view :params {:account-id account-id})]
+              (assoc context
+                     :tx-data [assoc account-id account]
+                     :response (created account "Location" url))))})
+
+(def account-withdraw
+  {:name :withdraw-from-account
+   :enter (fn [context]
+            (let [ammount (get-value-from-request-body
+                           context "ammount" 0)]
+              ;; TODO: check if there's money to withdraw
+              (assoc-in context [:request
+                                 :query-params
+                                 :ammount] (- ammount))))})
 
 (def account-view
   {:name :account-view
@@ -64,7 +92,9 @@
 (def routes
   (route/expand-routes
    #{["/account" :post [entity-render db-interceptor account-create]]
-     ["/account/:account-id" :get [entity-render account-view db-interceptor] :route-name :account-view]}))
+     ["/account/:account-id" :get [entity-render account-view db-interceptor] :route-name :account-view]
+     ["/account/:account-id/deposit" :post [entity-render db-interceptor account-deposit]]
+     ["/account/:account-id/deposit" :post [entity-render db-interceptor account-withdraw account-deposit] :route-name :withdraw-from-account]}))
 
 (def service-map
   {::http/routes routes
