@@ -1,7 +1,8 @@
-(ns main
+(ns banks.main
   (:require [io.pedestal.http :as http]
             [io.pedestal.http.route :as route]
             [io.pedestal.test :as test]
+            [utils :refer get-value-from-request-body]
             [cheshire.core :refer [generate-string parse-string]]))
 
 (defonce database (atom {}))
@@ -27,6 +28,7 @@
 (defn make-account [name]
   {:name name})
 
+
 (def account-create
   {:name :account-create
    :enter
@@ -42,7 +44,6 @@
        (assoc context
               :tx-data [assoc db-id new-account]
               :response (created new-account "Location" url))))})
-
 
 (def account-view
   {:name :account-view
