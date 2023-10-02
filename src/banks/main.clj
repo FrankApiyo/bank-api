@@ -1,6 +1,7 @@
 (ns banks.main
   (:require
    [banks.utils :refer [get-value-from-request-body
+                        get-request-body
                         get-and-update-account-balance]]
    [io.pedestal.http :as http]
    [io.pedestal.http.route :as route]
@@ -80,18 +81,22 @@
 (def send-money
   {:name :send-money
    :enter (fn [context]
-            (let [ammount (get-value-from-request-body
-                           context "ammount" 0)
-                  account-number (get-value-from-request-body
-                                  context "account-number" nil)
-                  credit-account (get-in context [:requst :database account-number])
+            (let [request-body (get-request-body
+                                context)
+                  ammount (get request-body
+                               "ammount" 0)
+                  account-number (get request-body
+                                      "account-number" nil)
+                  credit-account (get-in context [:request :database account-number])
                   account-id (get-in context [:request :path-params :account-id])
-                  debit-account (get-in context [:request :database account-id])]
+                  debit-account (get-in context [:request :database account-id])
+                  updated-debit-account (update-in debit-account [:ammount] - ammount)]
               (when (< ammount (:ammount debit-account))
                 (assoc context
+                       :result updated-debit-account
                        :tx-data [assoc
                                  account-id
-                                 (update-in debit-account [:ammount] - ammount)
+                                 updated-debit-account
                                  account-number
                                  (update-in credit-account [:ammount] + ammount)]))))})
 
@@ -150,14 +155,20 @@
   ;; no name set to unamed account; or we ask for name with a 400
   (io.pedestal.test/response-for (::http/service-fn @server) :post "/account")
   ;; test get account
-  (io.pedestal.test/response-for (::http/service-fn @server) :get "/account/acc21828")
+  (io.pedestal.test/response-for (::http/service-fn @server) :get "/account/acc21830")
 
   ;; deposit
-  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21828/deposit" :body (generate-string {:ammount 100}))
-  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21828/deposit" :body (generate-string {:ammount 100}))
+  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21830/deposit" :body (generate-string {:ammount 100}))
+  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21830/deposit" :body (generate-string {:ammount 100}))
+  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21830/deposit" :body (generate-string {:ammount 100}))
 
   ;; withdraw
-  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21828/withdraw" :body (generate-string {:ammount 100}))
+  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21830/withdraw" :body (generate-string {:ammount 100}))
+
+  ;; send
+  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21830/send" :body (generate-string
+                                                                                                   {:ammount 100
+                                                                                                    :account-number "acc21833"}))
   (keys @database)
   routes
   @server
