@@ -77,6 +77,24 @@
                                    :query-params
                                    :ammount] (- 0 ammount)))))})
 
+(def send-money
+  {:name :send-money
+   :enter (fn [context]
+            (let [ammount (get-value-from-request-body
+                           context "ammount" 0)
+                  account-number (get-value-from-request-body
+                                  context "account-number" nil)
+                  credit-account (get-in context [:requst :database account-number])
+                  account-id (get-in context [:request :path-params :account-id])
+                  debit-account (get-in context [:request :database account-id])]
+              (when (< ammount (:ammount debit-account))
+                (assoc context
+                       :tx-data [assoc
+                                 account-id
+                                 (update-in debit-account [:ammount] - ammount)
+                                 account-number
+                                 (update-in credit-account [:ammount] + ammount)]))))})
+
 (def account-view
   {:name :account-view
    :leave
@@ -98,7 +116,8 @@
    #{["/account" :post [entity-render db-interceptor account-create]]
      ["/account/:account-id" :get [entity-render account-view db-interceptor] :route-name :account-view]
      ["/account/:account-id/deposit" :post [entity-render db-interceptor account-deposit]]
-     ["/account/:account-id/withdraw" :post [entity-render db-interceptor account-withdraw account-deposit] :route-name :withdraw-from-account]}))
+     ["/account/:account-id/withdraw" :post [entity-render db-interceptor account-withdraw account-deposit] :route-name :withdraw-from-account]
+     ["/account/:account-id/send" :post [entity-render db-interceptor send-money]]}))
 
 (def service-map
   {::http/routes routes
