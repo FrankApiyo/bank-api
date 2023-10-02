@@ -1,11 +1,11 @@
 (ns banks.main
-  (:require [banks.utils :refer [get-value-from-request-body
-                                 get-and-update-account-balance]]
-            [io.pedestal.http :as http]
-            [io.pedestal.http.route :as route]
-            [io.pedestal.test :as test]
-            [utils :refer get-value-from-request-body]
-            [cheshire.core :refer [generate-string]]))
+  (:require
+   [banks.utils :refer [get-value-from-request-body
+                        get-and-update-account-balance]]
+   [io.pedestal.http :as http]
+   [io.pedestal.http.route :as route]
+   [io.pedestal.test :as test]
+   [cheshire.core :refer [generate-string]]))
 
 (defonce database (atom {}))
 
@@ -26,9 +26,11 @@
 (def ok (partial response 200))
 (def created (partial response 201))
 (def accepted (partial response 202))
+(def bad-request (partial response 400))
 
 (defn make-account [name]
-  {:name name})
+  {:name name
+   :ammount 0})
 
 (def account-create
   {:name :account-create
@@ -46,7 +48,7 @@
 (def account-deposit
   {:name :deposit-to-account
    :enter (fn [context]
-            (let [account-id (get-in context [:request :query-params :account-id])
+            (let [account-id (get-in context [:request :path-params :account-id])
                   ammount (or
                            (get-in context
                                    [:request
@@ -67,11 +69,13 @@
   {:name :withdraw-from-account
    :enter (fn [context]
             (let [ammount (get-value-from-request-body
-                           context "ammount" 0)]
-              ;; TODO: check if there's money to withdraw
-              (assoc-in context [:request
-                                 :query-params
-                                 :ammount] (- ammount))))})
+                           context "ammount" 0)
+                  account-id (get-in context [:request :path-params :account-id])
+                  account (get-in context [:request :database account-id])]
+              (when (< ammount (:ammount account))
+                (assoc-in context [:request
+                                   :query-params
+                                   :ammount] (- 0 ammount)))))})
 
 (def account-view
   {:name :account-view
@@ -94,7 +98,7 @@
    #{["/account" :post [entity-render db-interceptor account-create]]
      ["/account/:account-id" :get [entity-render account-view db-interceptor] :route-name :account-view]
      ["/account/:account-id/deposit" :post [entity-render db-interceptor account-deposit]]
-     ["/account/:account-id/deposit" :post [entity-render db-interceptor account-withdraw account-deposit] :route-name :withdraw-from-account]}))
+     ["/account/:account-id/withdraw" :post [entity-render db-interceptor account-withdraw account-deposit] :route-name :withdraw-from-account]}))
 
 (def service-map
   {::http/routes routes
@@ -127,7 +131,14 @@
   ;; no name set to unamed account; or we ask for name with a 400
   (io.pedestal.test/response-for (::http/service-fn @server) :post "/account")
   ;; test get account
-  (io.pedestal.test/response-for (::http/service-fn @server) :get "/account/acc21826")
+  (io.pedestal.test/response-for (::http/service-fn @server) :get "/account/acc21828")
+
+  ;; deposit
+  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21828/deposit" :body (generate-string {:ammount 100}))
+  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21828/deposit" :body (generate-string {:ammount 100}))
+
+  ;; withdraw
+  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21828/withdraw" :body (generate-string {:ammount 100}))
   (keys @database)
   routes
   @server
