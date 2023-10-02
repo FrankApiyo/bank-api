@@ -3,21 +3,48 @@
    [banks.utils :refer [get-value-from-request-body
                         get-request-body
                         get-and-update-account-balance]]
+   [banks.db :refer [init-db]]
    [io.pedestal.http :as http]
    [io.pedestal.http.route :as route]
    [io.pedestal.test :as test]
-   [cheshire.core :refer [generate-string]]))
+   [cheshire.core :refer [generate-string]]
+   [datomic.api :as d]))
 
-(defonce database (atom {}))
+(defonce database (atom nil))
+
+(defn set-db-atom
+  []
+  (let [db-conn @database]
+    (when-not db-conn
+      (reset! db-conn (init-db)))))
+
+(defn account-update [conn account-id {:keys {ammount description}}]
+  (let [db (d/db conn)
+        [account-id counter-val]
+        (first (d/q '[:find ?e ?counter-val
+                      :where [?e :db/id account-id
+                              ?e :account/counter ?counter-val]]
+                    db account-id))]
+    @(d/transact conn [{:db/id account-id :account/ammount ammount :account/description description
+                        :account/counter (inc counter-val)}])))
+
+(defn create-account
+  [conn {:keys [name ammount]}]
+  @(d/transact conn {:account/name name
+                     :account/ammount ammount
+                     :account/counter 0}))
 
 (def db-interceptor
   {:name :database-interceptor
    :enter (fn [context]
             (update context :request assoc :database @database))
    :leave (fn [context]
-            (if-let [[op & args] (:tx-data context)]
+            (if-let [tx-data (:tx-data context)]
               (do
-                (apply swap! database op args)
+                (mapv
+                 (fn [[account-id & args]]
+                   (account-update @database account-id args))
+                 tx-data)
                 (assoc-in context [:request :database] @database))
               context))})
 
@@ -29,9 +56,6 @@
 (def accepted (partial response 202))
 (def bad-request (partial response 400))
 
-(defn make-account [name]
-  {:name name
-   :ammount 0})
 
 (def account-create
   {:name :account-create
@@ -40,11 +64,9 @@
      (let [name (get-value-from-request-body
                  context "name" "Unamed Account")
            db-id (str (gensym "acc"))
-           url (route/url-for :account-view :params {:account-id db-id})
-           new-account (make-account name)]
+           url (route/url-for :account-view :params {:account-id db-id})]
        (assoc context
-              :tx-data [assoc db-id new-account]
-              :response (created new-account "Location" url))))})
+              :response (created (create-account @database name) "Location" url))))})
 
 (def account-deposit
   {:name :deposit-to-account
@@ -63,7 +85,7 @@
                            ammount)
                   url (route/url-for :account-view :params {:account-id account-id})]
               (assoc context
-                     :tx-data [assoc account-id account]
+                     :tx-data [[account-id account]]
                      :response (created account "Location" url))))})
 
 (def account-withdraw
@@ -94,11 +116,9 @@
               (when (< ammount (:ammount debit-account))
                 (assoc context
                        :result updated-debit-account
-                       :tx-data [assoc
-                                 account-id
-                                 updated-debit-account
-                                 account-number
-                                 (update-in credit-account [:ammount] + ammount)]))))})
+                       :tx-data [[account-id updated-debit-account]
+                                 [account-number
+                                  (update-in credit-account [:ammount] + ammount)]]))))})
 
 (def account-view
   {:name :account-view
@@ -148,7 +168,9 @@
   (stop-dev)
   (start-dev))
 
+
 (comment
+  (set-db-atom)
   (restart)
   ;; name set correctly
   (io.pedestal.test/response-for (::http/service-fn @server) :post "/account" :body (generate-string {:name "Frankline"}))

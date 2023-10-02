@@ -4,5 +4,6 @@
   io.pedestal/pedestal.jetty   {:mvn/version "0.5.7"}
   org.clojure/data.json        {:mvn/version "0.2.6"}
   org.slf4j/slf4j-simple       {:mvn/version "1.7.28"}
+  com.datomic/peer {:mvn/version "1.0.6735"}
   cheshire/cheshire {:mvn/version "5.12.0"}}
  :paths ["src"]}
