@@ -19,7 +19,12 @@
                      {:db/ident      :account/description
                       :db/valueType   :db.type/string
                       :db/cardinality :db.cardinality/one
-                      :db/doc         "Description for each transaction"}])
+                      :db/doc         "Description for each transaction"}
+
+                     {:db/ident       :account/credit
+                      :db/valueType   :db.type/long
+                      :db/cardinality :db.cardinality/one
+                      :db/doc         "how much was removed or added"}])
 
 (defn init-db
   []
@@ -34,9 +39,9 @@
   (def first-account [{:account/name "Frankline"
                        :account/ammount 100
                        :account/counter 0}])
-  @(d/transact @database {:account/name "name"
-                          :account/ammount 0
-                          :account/counter 0})
+  ;; @(d/transact @database {:account/name "name"
+  ;;                         :account/ammount 0
+  ;;                         :account/counter 0})
 
   @(d/transact conn first-account)
   (def db (d/db conn))

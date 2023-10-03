@@ -30,9 +30,10 @@
                   :where [?e :account/counter ?counter-val]]
                 db id))]
     @(d/transact @database [{:db/id account-id :account/ammount ammount :account/description (or description "")
-                             :account/counter (inc counter-val)}])))
+                             :account/counter (inc counter-val)
+                             :account/credit 0}])))
 
-(defn account-update [conn account-id {:keys [ammount description _name]}]
+(defn account-update [conn account-id {:keys [ammount description _name credit]}]
   (let [db (d/db conn)
         [account-id counter-val]
         (first (d/q
@@ -43,19 +44,22 @@
                      (read-string account-id)
                      account-id)))]
     @(d/transact conn [{:db/id account-id :account/ammount ammount :account/description (or description "")
-                        :account/counter (inc counter-val)}])))
+                        :account/counter (inc counter-val)
+                        :account/credit credit}])))
 
 (comment
   @(d/transact @database [{:account/name "name"
                            :account/ammount 0
-                           :account/counter 0}]))
+                           :account/counter 0
+                           :account/credit 0}]))
 
 
 (defn create-account
   [conn name]
   @(d/transact conn [{:account/name name
                       :account/ammount 0
-                      :account/counter 0}]))
+                      :account/counter 0
+                      :account/credit 0}]))
 
 (def db-interceptor
   {:name :database-interceptor
@@ -132,7 +136,8 @@
                account-id)))
         new-ammount (+ diff account-balance)]
     @(d/transact @database [{:db/id account-id :account/ammount new-ammount :account/description description
-                             :account/counter (inc counter-val)}])
+                             :account/counter (inc counter-val)
+                             :account/credit diff}])
     {:ammount new-ammount
      :name account-name
      :id account-id}))
@@ -225,10 +230,13 @@
               (when (< ammount (:ammount debit-account))
                 (assoc context
                        :result updated-debit-account
-                       :tx-data [[account-id updated-debit-account]
+                       :tx-data [[account-id (assoc updated-debit-account
+                                                    :credit (- 0 ammount))]
                                  [account-number
-                                  (update-in credit-account [:ammount] + ammount)]]))))})
-
+                                  (->
+                                   credit-account
+                                   (update-in [:ammount] + ammount)
+                                   (assoc :credit ammount))]]))))})
 
 (def account-view
   {:name :account-view
@@ -255,12 +263,42 @@
        (assoc context :response (ok item))
        context))})
 
+(comment
+  (let [account-id 17592186045420
+        hdb (d/history (d/db @database))]
+    (d/q '[:find ?counter-val ?description ?credit
+           :in $ ?e
+           :where [?e :account/ammount ?balance]
+           [?e :account/counter ?counter-val]
+           [?e :account/credit ?credit]
+           [?e :account/description ?description]]
+         hdb account-id)))
+
 (def account-audit
   {:name :account-audit
    :leave
    (fn [context]
-     (let [account-id (get-in context [:request :path-params :account-id])]
-       account-id))})
+     (let [account-id (get-in context [:request :path-params :account-id])
+           hdb (d/history (d/db @database))
+           history (d/q '[:find ?counter-val ?description ?credit
+                          :in $ ?e
+                          :where [?e :account/ammount ?balance]
+                          [?e :account/counter ?counter-val]
+                          [?e :account/credit ?credit]
+                          [?e :account/description ?description]]
+                        hdb (if (string? account-id)
+                              (read-string account-id)
+                              account-id))]
+       (assoc context :result
+              (mapv
+               (fn [[counter-val description credit]]
+                 (merge
+                  {:sequence counter-val
+                   :description description}
+                  (if (pos? credit)
+                    {:credit credit}
+                    {:debit credit})))
+               history))))})
 
 (def routes
   (route/expand-routes
@@ -269,9 +307,10 @@
      ["/account/:account-id/deposit" :post [entity-render db-interceptor account-deposit]]
      ["/account/:account-id/withdraw" :post [entity-render db-interceptor account-withdraw account-deposit] :route-name :withdraw-from-account]
      ["/account/:account-id/send" :post [entity-render db-interceptor send-money]]
-    ;;  ["/account/:account-id/audit" :get [account-audit]]
-     }))
+     ["/account/:account-id/audit" :get [entity-render account-audit]]}))
 
+;; TODO: Ensure sequence is always updated .5
+;; TODO: Some final code cleanup 1
 ;; TODO: Add some tests .5
 ;; TODO: Add error handling 1
 
@@ -297,6 +336,7 @@
 
 (defn restart []
   (stop-dev)
+  (reset! server nil)
   (start-dev))
 
 
@@ -312,7 +352,7 @@
   (io.pedestal.test/response-for (::http/service-fn @server) :get "/account/17592186045420")
 
 
-  ;; deposit
+  ;; deposit x 5
   (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/17592186045418/deposit" :body (generate-string {:ammount 100}))
 
   ;; withdraw
@@ -320,8 +360,10 @@
 
   ;; send
   (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/17592186045418/send" :body (generate-string
-                                                                                                         {:ammount 100
-                                                                                                          :account-number "17592186045420"}))
-  routes
-  @server
-  (reset! server nil))
+                                                                                                         {:ammount 100 :account-number "17592186045420"}))
+
+  ;; test get account
+  (io.pedestal.test/response-for (::http/service-fn @server) :get "/account/17592186045418")
+  (io.pedestal.test/response-for (::http/service-fn @server) :get "/account/17592186045420")
+
+  (io.pedestal.test/response-for (::http/service-fn @server) :get "/account/17592186045420/audit"))
