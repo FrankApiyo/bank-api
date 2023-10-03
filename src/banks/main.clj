@@ -1,9 +1,8 @@
 (ns banks.main
   (:require
    [banks.utils :refer [get-value-from-request-body
-                        get-request-body
-                        get-and-update-account-balance]]
-   [banks.db :refer [init-db]]
+                        get-request-body]]
+   [banks.db :refer [init-db account-schema]]
    [io.pedestal.http :as http]
    [io.pedestal.http.route :as route]
    [io.pedestal.test :as test]
@@ -16,23 +15,47 @@
   []
   (let [db-conn @database]
     (when-not db-conn
-      (reset! db-conn (init-db)))))
+      (reset! database (init-db))
+      @(d/transact @database account-schema))))
 
-(defn account-update [conn account-id {:keys {ammount description}}]
+(comment
+  (let [db (d/db @database)
+        {:keys [ammount description _name id]}
+        {:name "Frankline", :ammount 200, :id 17592186045418}
+
+        [account-id counter-val]
+        (first (d/q
+                '[:find ?e  ?counter-val
+                  :in $ ?e
+                  :where [?e :account/counter ?counter-val]]
+                db id))]
+    @(d/transact @database [{:db/id account-id :account/ammount ammount :account/description (or description "")
+                             :account/counter (inc counter-val)}])))
+
+(defn account-update [conn account-id {:keys [ammount description _name]}]
   (let [db (d/db conn)
         [account-id counter-val]
-        (first (d/q '[:find ?e ?counter-val
-                      :where [?e :db/id account-id
-                              ?e :account/counter ?counter-val]]
-                    db account-id))]
-    @(d/transact conn [{:db/id account-id :account/ammount ammount :account/description description
+        (first (d/q
+                '[:find ?e  ?counter-val
+                  :in $ ?e
+                  :where [?e :account/counter ?counter-val]]
+                db (if (string? account-id)
+                     (read-string account-id)
+                     account-id)))]
+    @(d/transact conn [{:db/id account-id :account/ammount ammount :account/description (or description "")
                         :account/counter (inc counter-val)}])))
 
+(comment
+  @(d/transact @database [{:account/name "name"
+                           :account/ammount 0
+                           :account/counter 0}]))
+
+
 (defn create-account
-  [conn {:keys [name ammount]}]
-  @(d/transact conn {:account/name name
-                     :account/ammount ammount
-                     :account/counter 0}))
+  [conn name]
+  @(d/transact conn [{:account/name name
+                      :account/ammount 0
+                      :account/counter 0}]))
 
 (def db-interceptor
   {:name :database-interceptor
@@ -40,12 +63,12 @@
             (update context :request assoc :database @database))
    :leave (fn [context]
             (if-let [tx-data (:tx-data context)]
-              (do
-                (mapv
-                 (fn [[account-id & args]]
-                   (account-update @database account-id args))
-                 tx-data)
-                (assoc-in context [:request :database] @database))
+              (doall
+               (mapv
+                (fn [[account-id & args]]
+                  (account-update @database account-id args))
+                tx-data)
+               (assoc-in context [:request :database] @database))
               context))})
 
 (defn response [status body & {:as headers}]
@@ -64,28 +87,75 @@
      (let [name (get-value-from-request-body
                  context "name" "Unamed Account")
            db-id (str (gensym "acc"))
-           url (route/url-for :account-view :params {:account-id db-id})]
+           url (route/url-for :account-view :params {:account-id db-id})
+           id (-> (create-account @database name)
+                  :tempids
+                  vals
+                  first)]
        (assoc context
-              :response (created (create-account @database name) "Location" url))))})
+              :response (created
+                         {:name name
+                          :id id
+                          :ammount 0}
+                         "Location" url))))})
+
+(comment
+  (let [db (d/db @database)
+        _eid (nth
+              (first
+               (d/q
+                '[:find ?account-balance ?e
+                  :where [?e :account/name "Frankline"]
+                  [?e :account/ammount ?account-balance]]
+                db))
+              1)]
+    (d/q
+     '[:find ?account-balance ?e ?name
+       :in $ ?e
+       :where [?e :account/ammount ?account-balance]
+       [?e :account/name ?name]]
+     db (read-string "17592186045418"))))
+
+(defn get-and-update-account-balance
+  [account-id diff description]
+  (let [db (d/db @database)
+        [account-balance account-id account-name counter-val] (first
+                                                               (d/q
+                                                                '[:find ?account-balance ?e ?name ?counter-val
+                                                                  :in $ ?e
+                                                                  :where [?e :account/ammount ?account-balance]
+                                                                  [?e :account/counter ?counter-val]
+                                                                  [?e :account/name ?name]]
+                                                                db (if (string? account-id)
+                                                                     (read-string account-id)
+                                                                     account-id)))
+        new-ammount (+ diff account-balance)]
+    @(d/transact @database [{:db/id account-id :account/ammount new-ammount :account/description description
+                             :account/counter (inc counter-val)}])
+    {:ammount new-ammount
+     :name account-name
+     :id account-id}))
 
 (def account-deposit
   {:name :deposit-to-account
    :enter (fn [context]
             (let [account-id (get-in context [:request :path-params :account-id])
-                  ammount (or
-                           (get-in context
-                                   [:request
-                                    :query-params
-                                    :ammount])
-                           (get-value-from-request-body
-                            context "ammount" 0))
+                  withdraw-ammount (get-in context
+                                           [:request
+                                            :query-params
+                                            :ammount])
+                  deposit-ammount (get-value-from-request-body
+                                   context "ammount" 0)
+                  ammount (or withdraw-ammount
+                              deposit-ammount)
                   account (get-and-update-account-balance
-                           context
                            account-id
-                           ammount)
+                           ammount
+                           (if deposit-ammount
+                             "Account deposit"
+                             "Account withdraw"))
                   url (route/url-for :account-view :params {:account-id account-id})]
               (assoc context
-                     :tx-data [[account-id account]]
                      :response (created account "Location" url))))})
 
 (def account-withdraw
@@ -94,7 +164,17 @@
             (let [ammount (get-value-from-request-body
                            context "ammount" 0)
                   account-id (get-in context [:request :path-params :account-id])
-                  account (get-in context [:request :database account-id])]
+                  db (d/db @database)
+                  [balance id account-name] (first
+                                             (d/q
+                                              '[:find ?account-balance ?e ?name
+                                                :in $ ?e
+                                                :where [?e :account/ammount ?account-balance]
+                                                [?e :account/name ?name]]
+                                              db (read-string account-id)))
+                  account {:name account-name
+                           :ammount balance
+                           :id id}]
               (when (< ammount (:ammount account))
                 (assoc-in context [:request
                                    :query-params
@@ -107,12 +187,40 @@
                                 context)
                   ammount (get request-body
                                "ammount" 0)
+                  ammount (if (string? ammount)
+                            (read-string ammount)
+                            ammount)
                   account-number (get request-body
                                       "account-number" nil)
-                  credit-account (get-in context [:request :database account-number])
+                  db (d/db @database)
+                  [balance id account-name] (first
+                                             (d/q
+                                              '[:find ?account-balance ?e ?name
+                                                :in $ ?e
+                                                :where [?e :account/ammount ?account-balance]
+                                                [?e :account/name ?name]]
+                                              db (if (string? account-number)
+                                                   (read-string account-number)
+                                                   account-number)))
+                  credit-account {:name account-name
+                                  :ammount balance
+                                  :id id}
                   account-id (get-in context [:request :path-params :account-id])
-                  debit-account (get-in context [:request :database account-id])
-                  updated-debit-account (update-in debit-account [:ammount] - ammount)]
+                  [debit-balance debit-id debit-account-name]
+                  (first
+                   (d/q
+                    '[:find ?account-balance ?e ?name
+                      :in $ ?e
+                      :where [?e :account/ammount ?account-balance]
+                      [?e :account/name ?name]]
+                    db (if (string? account-id)
+                         (read-string account-id)
+                         account-id)))
+                  debit-account {:name debit-account-name
+                                 :ammount debit-balance
+                                 :id debit-id}
+                  updated-debit-account
+                  (update-in debit-account [:ammount] - ammount)]
               (when (< ammount (:ammount debit-account))
                 (assoc context
                        :result updated-debit-account
@@ -120,13 +228,23 @@
                                  [account-number
                                   (update-in credit-account [:ammount] + ammount)]]))))})
 
+
 (def account-view
   {:name :account-view
    :leave
    (fn [context]
      (let [account-id (get-in context [:request :path-params :account-id])
-           account (get-in context [:request :database account-id])]
-       (assoc context :result account)))})
+           db (d/db @database)
+           [account-balance _account-id account-name]
+           (first
+            (d/q
+             '[:find ?account-balance ?e ?name
+               :in $ ?e
+               :where [?e :account/ammount ?account-balance]
+               [?e :account/name ?name]]
+             db (read-string account-id)))]
+       (assoc context :result {:ammount account-balance
+                               :name account-name})))})
 
 (def entity-render
   {:name :entity-render
@@ -171,27 +289,26 @@
 
 (comment
   (set-db-atom)
-  (restart)
+  (start-dev)
   ;; name set correctly
   (io.pedestal.test/response-for (::http/service-fn @server) :post "/account" :body (generate-string {:name "Frankline"}))
   ;; no name set to unamed account; or we ask for name with a 400
   (io.pedestal.test/response-for (::http/service-fn @server) :post "/account")
   ;; test get account
-  (io.pedestal.test/response-for (::http/service-fn @server) :get "/account/acc21830")
+  (io.pedestal.test/response-for (::http/service-fn @server) :get "/account/17592186045418")
+  (io.pedestal.test/response-for (::http/service-fn @server) :get "/account/17592186045420")
+
 
   ;; deposit
-  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21830/deposit" :body (generate-string {:ammount 100}))
-  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21830/deposit" :body (generate-string {:ammount 100}))
-  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21830/deposit" :body (generate-string {:ammount 100}))
+  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/17592186045418/deposit" :body (generate-string {:ammount 100}))
 
   ;; withdraw
-  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21830/withdraw" :body (generate-string {:ammount 100}))
+  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/17592186045418/withdraw" :body (generate-string {:ammount 100}))
 
   ;; send
-  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/acc21830/send" :body (generate-string
-                                                                                                   {:ammount 100
-                                                                                                    :account-number "acc21833"}))
-  (keys @database)
+  (io.pedestal.test/response-for (::http/service-fn @server) :post "/account/17592186045418/send" :body (generate-string
+                                                                                                         {:ammount 100
+                                                                                                          :account-number "17592186045420"}))
   routes
   @server
   (reset! server nil))

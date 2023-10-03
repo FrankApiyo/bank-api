@@ -34,6 +34,9 @@
   (def first-account [{:account/name "Frankline"
                        :account/ammount 100
                        :account/counter 0}])
+  @(d/transact @database {:account/name "name"
+                          :account/ammount 0
+                          :account/counter 0})
 
   @(d/transact conn first-account)
   (def db (d/db conn))
