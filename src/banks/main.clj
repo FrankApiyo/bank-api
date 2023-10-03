@@ -309,10 +309,10 @@
      ["/account/:account-id/send" :post [entity-render db-interceptor send-money]]
      ["/account/:account-id/audit" :get [entity-render account-audit]]}))
 
-;; TODO: Ensure sequence is always updated .5
-;; TODO: Some final code cleanup 1
-;; TODO: Add some tests .5
-;; TODO: Add error handling 1
+;; TODO: Ensure sequence & comment is always updated .5
+;; TODO: Some final code cleanup .5 (ensure we always return correct response)
+;; TODO: Add some tests .2
+;; TODO: Add error handling 1.3 (reading and implementing)
 
 (def service-map
   {::http/routes routes
@@ -343,6 +343,8 @@
 (comment
   (set-db-atom)
   (start-dev)
+
+  (restart)
   ;; name set correctly
   (io.pedestal.test/response-for (::http/service-fn @server) :post "/account" :body (generate-string {:name "Frankline"}))
   ;; no name set to unamed account; or we ask for name with a 400
