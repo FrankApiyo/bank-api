@@ -262,6 +262,10 @@
      ["/account/:account-id/withdraw" :post [entity-render db-interceptor account-withdraw account-deposit] :route-name :withdraw-from-account]
      ["/account/:account-id/send" :post [entity-render db-interceptor send-money]]}))
 
+;; TODO: Add audit log endpoint
+;; TODO: Add some tests
+;; TODO: Add error handling
+
 (def service-map
   {::http/routes routes
    ::http/type :jetty
