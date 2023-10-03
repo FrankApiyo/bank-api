@@ -63,12 +63,12 @@
             (update context :request assoc :database @database))
    :leave (fn [context]
             (if-let [tx-data (:tx-data context)]
-              (doall
-               (mapv
-                (fn [[account-id & args]]
-                  (account-update @database account-id args))
-                tx-data)
-               (assoc-in context [:request :database] @database))
+              (do
+                (mapv
+                 (fn [[account-id args]]
+                   (account-update @database account-id args))
+                 tx-data)
+                context)
               context))})
 
 (defn response [status body & {:as headers}]
@@ -119,16 +119,17 @@
 (defn get-and-update-account-balance
   [account-id diff description]
   (let [db (d/db @database)
-        [account-balance account-id account-name counter-val] (first
-                                                               (d/q
-                                                                '[:find ?account-balance ?e ?name ?counter-val
-                                                                  :in $ ?e
-                                                                  :where [?e :account/ammount ?account-balance]
-                                                                  [?e :account/counter ?counter-val]
-                                                                  [?e :account/name ?name]]
-                                                                db (if (string? account-id)
-                                                                     (read-string account-id)
-                                                                     account-id)))
+        [account-balance account-id account-name counter-val]
+        (first
+         (d/q
+          '[:find ?account-balance ?e ?name ?counter-val
+            :in $ ?e
+            :where [?e :account/ammount ?account-balance]
+            [?e :account/counter ?counter-val]
+            [?e :account/name ?name]]
+          db (if (string? account-id)
+               (read-string account-id)
+               account-id)))
         new-ammount (+ diff account-balance)]
     @(d/transact @database [{:db/id account-id :account/ammount new-ammount :account/description description
                              :account/counter (inc counter-val)}])
@@ -254,17 +255,25 @@
        (assoc context :response (ok item))
        context))})
 
+(def account-audit
+  {:name :account-audit
+   :leave
+   (fn [context]
+     (let [account-id (get-in context [:request :path-params :account-id])]
+       account-id))})
+
 (def routes
   (route/expand-routes
    #{["/account" :post [entity-render db-interceptor account-create]]
      ["/account/:account-id" :get [entity-render account-view db-interceptor] :route-name :account-view]
      ["/account/:account-id/deposit" :post [entity-render db-interceptor account-deposit]]
      ["/account/:account-id/withdraw" :post [entity-render db-interceptor account-withdraw account-deposit] :route-name :withdraw-from-account]
-     ["/account/:account-id/send" :post [entity-render db-interceptor send-money]]}))
+     ["/account/:account-id/send" :post [entity-render db-interceptor send-money]]
+    ;;  ["/account/:account-id/audit" :get [account-audit]]
+     }))
 
-;; TODO: Add audit log endpoint
-;; TODO: Add some tests
-;; TODO: Add error handling
+;; TODO: Add some tests .5
+;; TODO: Add error handling 1
 
 (def service-map
   {::http/routes routes
