@@ -59,7 +59,8 @@
   @(d/transact conn [{:account/name name
                       :account/ammount 0
                       :account/counter 0
-                      :account/credit 0}]))
+                      :account/credit 0
+                      :account/description ""}]))
 
 (def db-interceptor
   {:name :database-interceptor
@@ -208,10 +209,11 @@
                                               db (if (string? account-number)
                                                    (read-string account-number)
                                                    account-number)))
+                  account-id (get-in context [:request :path-params :account-id])
                   credit-account {:name account-name
                                   :ammount balance
-                                  :id id}
-                  account-id (get-in context [:request :path-params :account-id])
+                                  :id id
+                                  :description (str "Received from " account-id)}
                   [debit-balance debit-id debit-account-name]
                   (first
                    (d/q
@@ -224,7 +226,8 @@
                          account-id)))
                   debit-account {:name debit-account-name
                                  :ammount debit-balance
-                                 :id debit-id}
+                                 :id debit-id
+                                 :description (str "sent to " id)}
                   updated-debit-account
                   (update-in debit-account [:ammount] - ammount)]
               (when (< ammount (:ammount debit-account))
@@ -309,8 +312,6 @@
      ["/account/:account-id/send" :post [entity-render db-interceptor send-money]]
      ["/account/:account-id/audit" :get [entity-render account-audit]]}))
 
-;; TODO: Ensure sequence & comment is always updated .5
-;; TODO: Some final code cleanup .5 (ensure we always return correct response)
 ;; TODO: Add some tests .2
 ;; TODO: Add error handling 1.3 (reading and implementing)
 
