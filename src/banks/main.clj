@@ -18,21 +18,6 @@
       (reset! database (init-db))
       @(d/transact @database account-schema))))
 
-(comment
-  (let [db (d/db @database)
-        {:keys [ammount description _name id]}
-        {:name "Frankline", :ammount 200, :id 17592186045418}
-
-        [account-id counter-val]
-        (first (d/q
-                '[:find ?e  ?counter-val
-                  :in $ ?e
-                  :where [?e :account/counter ?counter-val]]
-                db id))]
-    @(d/transact @database [{:db/id account-id :account/ammount ammount :account/description (or description "")
-                             :account/counter (inc counter-val)
-                             :account/credit 0}])))
-
 (defn account-update [conn account-id {:keys [ammount description _name credit]}]
   (let [db (d/db conn)
         [account-id counter-val]
@@ -46,13 +31,6 @@
     @(d/transact conn [{:db/id account-id :account/ammount ammount :account/description (or description "")
                         :account/counter (inc counter-val)
                         :account/credit credit}])))
-
-(comment
-  @(d/transact @database [{:account/name "name"
-                           :account/ammount 0
-                           :account/counter 0
-                           :account/credit 0}]))
-
 
 (defn create-account
   [conn name]
@@ -84,7 +62,6 @@
 (def accepted (partial response 202))
 (def bad-request (partial response 400))
 
-
 (def account-create
   {:name :account-create
    :enter
@@ -103,23 +80,6 @@
                           :id id
                           :ammount 0}
                          "Location" url))))})
-
-(comment
-  (let [db (d/db @database)
-        _eid (nth
-              (first
-               (d/q
-                '[:find ?account-balance ?e
-                  :where [?e :account/name "Frankline"]
-                  [?e :account/ammount ?account-balance]]
-                db))
-              1)]
-    (d/q
-     '[:find ?account-balance ?e ?name
-       :in $ ?e
-       :where [?e :account/ammount ?account-balance]
-       [?e :account/name ?name]]
-     db (read-string "17592186045418"))))
 
 (defn get-and-update-account-balance
   [account-id diff description]
@@ -266,17 +226,6 @@
        (assoc context :response (ok item))
        context))})
 
-(comment
-  (let [account-id 17592186045420
-        hdb (d/history (d/db @database))]
-    (d/q '[:find ?counter-val ?description ?credit
-           :in $ ?e
-           :where [?e :account/ammount ?balance]
-           [?e :account/counter ?counter-val]
-           [?e :account/credit ?credit]
-           [?e :account/description ?description]]
-         hdb account-id)))
-
 (def account-audit
   {:name :account-audit
    :leave
@@ -313,7 +262,6 @@
      ["/account/:account-id/audit" :get [entity-render account-audit]]}))
 
 ;; TODO: Add some tests .2
-;; TODO: Add error handling 1.3 (reading and implementing)
 
 (def service-map
   {::http/routes routes
@@ -339,7 +287,6 @@
   (stop-dev)
   (reset! server nil)
   (start-dev))
-
 
 (comment
   (set-db-atom)

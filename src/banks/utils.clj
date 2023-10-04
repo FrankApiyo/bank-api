@@ -16,14 +16,3 @@
       slurp
       parse-string
       (get value-key default-value)))
-
-;; (comment
-;;   (=
-;;    {:ammount 300
-;;     :name "Frankline"}
-;;    (get-and-update-account-balance
-;;     {:request
-;;      {:database
-;;       {1 {:ammount 200
-;;           :name "Frankline"}}}}
-;;     1 100)))
