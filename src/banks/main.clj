@@ -261,8 +261,6 @@
      ["/account/:account-id/send" :post [entity-render db-interceptor send-money]]
      ["/account/:account-id/audit" :get [entity-render account-audit]]}))
 
-;; TODO: Add some tests .2
-
 (def service-map
   {::http/routes routes
    ::http/type :jetty
